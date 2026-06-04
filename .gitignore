@@ -28,3 +28,13 @@ DerivedData/
 build/
 *.xcuserstate
 xcuserdata/
+
+# Xcode user/local files
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+# Local release build artifacts
+releases/
+*.dmg
