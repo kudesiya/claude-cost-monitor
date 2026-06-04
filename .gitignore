@@ -26,3 +26,5 @@ xcuserdata/
 *.xcscmblueprint
 DerivedData/
 build/
+*.xcuserstate
+xcuserdata/
