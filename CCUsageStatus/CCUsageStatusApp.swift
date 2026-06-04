@@ -27,7 +27,11 @@ struct CCUsageStatusApp: App {
 
             Toggle("Auto Refresh (5 min)", isOn: $model.autoRefresh)
                 .onChange(of: model.autoRefresh) { enabled in
-                    enabled ? model.startTimer() : model.stopTimer()
+                    if enabled {
+                        model.startTimer()
+                    } else {
+                        model.stopTimer()
+                    }
                 }
 
             Button("Refresh Now") {
@@ -55,30 +59,37 @@ final class CCUsageModel: ObservableObject {
     @Published var updatedText = "Last Refresh: Loading..."
     @Published var autoRefresh = true
 
-    private var refreshTimer: Timer?
+    private var refreshCancellable: AnyCancellable?
 
     init() {
         refresh()
-        startTimer()
+
+        if autoRefresh {
+            startTimer()
+        }
     }
 
     func startTimer() {
         stopTimer()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { _ in
-            self.refresh()
-        }
+
+        refreshCancellable = Timer
+            .publish(every: 300, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.refresh()
+            }
     }
 
     func stopTimer() {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
+        refreshCancellable?.cancel()
+        refreshCancellable = nil
     }
 
     func refresh() {
         let jsonOutput = runCommand("npx ccusage --json")
 
         guard let data = jsonOutput.data(using: .utf8) else {
-            setError("No data")
+            setError("No data from ccusage")
             return
         }
 
@@ -86,13 +97,13 @@ final class CCUsageModel: ObservableObject {
             let usage = try JSONDecoder().decode(CCUsageResponse.self, from: data)
             updateDisplay(from: usage)
         } catch {
-            setError("Parse error")
+            setError("Unable to parse ccusage output")
         }
     }
 
     func updateDisplay(from usage: CCUsageResponse) {
         guard let latest = usage.daily.last else {
-            setError("No usage")
+            setError("No usage data found")
             return
         }
 
@@ -109,11 +120,17 @@ final class CCUsageModel: ObservableObject {
             indicator = "🔴"
         }
 
-        let yesterdayCost = usage.daily.count >= 2 ? usage.daily[usage.daily.count - 2].totalCost : 0
+        let yesterdayCost = usage.daily.count >= 2
+            ? usage.daily[usage.daily.count - 2].totalCost
+            : 0
+
         let diff = todayCost - yesterdayCost
         let trendPct = yesterdayCost > 0 ? (diff / yesterdayCost) * 100 : 0
 
-        let projectedMonth = calculateProjectedMonth(daily: usage.daily, latestPeriod: latest.period)
+        let projectedMonth = calculateProjectedMonth(
+            daily: usage.daily,
+            latestPeriod: latest.period
+        )
 
         let modelBreakdown = latest.modelBreakdowns
             .map { item in
@@ -152,13 +169,28 @@ final class CCUsageModel: ObservableObject {
         let day = Calendar.current.component(.day, from: latestDate)
         let daysInMonth = range.count
 
+        guard day > 0 else {
+            return monthCost
+        }
+
         return (monthCost / Double(day)) * Double(daysInMonth)
     }
 
     func shortModelName(_ name: String) -> String {
-        if name.contains("opus") { return "Opus" }
-        if name.contains("sonnet") { return "Sonnet" }
-        if name.contains("haiku") { return "Haiku" }
+        let lower = name.lowercased()
+
+        if lower.contains("opus") {
+            return "Opus"
+        }
+
+        if lower.contains("sonnet") {
+            return "Sonnet"
+        }
+
+        if lower.contains("haiku") {
+            return "Haiku"
+        }
+
         return name
     }
 
@@ -166,9 +198,11 @@ final class CCUsageModel: ObservableObject {
         if tokens >= 1_000_000 {
             return String(format: "%.1fM", Double(tokens) / 1_000_000)
         }
+
         if tokens >= 1_000 {
             return String(format: "%.1fK", Double(tokens) / 1_000)
         }
+
         return "\(tokens)"
     }
 
@@ -176,12 +210,12 @@ final class CCUsageModel: ObservableObject {
         DispatchQueue.main.async {
             self.menuTitle = "CC Err"
             self.todayText = message
-            self.totalText = ""
-            self.tokensText = ""
-            self.projectionText = ""
-            self.trendText = ""
+            self.totalText = "Install dependencies:"
+            self.tokensText = "brew install node"
+            self.projectionText = "npm install -g ccusage"
+            self.trendText = "Verify: npx ccusage --json"
             self.modelsText = ""
-            self.updatedText = ""
+            self.updatedText = "Last Refresh Failed"
         }
     }
 
